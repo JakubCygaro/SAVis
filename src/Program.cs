@@ -41,12 +41,14 @@ internal class Program
     static string _inputText = "";
     static string _inputHistory = "";
     static LinkedList<string> _commandHistory = new();
+    static Dictionary<string, IEnumerable<string>> _commands;
     static Program()
     {
         _elementArray = new(_elemCount);
         _sortingContext = new(_elementArray);
         _currentSorter = ISorter.Default;
         _sorters[_currentSorter.Name] = _currentSorter;
+        _commands = Command.GetCommandNamesWithAliases();
     }
     static void Main(string[] args)
     {
@@ -299,6 +301,14 @@ internal class Program
 
             case StopScriptCommand:
                 _currentSorterEnumm = null;
+            break;
+
+            case CommandsCommand:
+                AddCommandHistory("Commands:");
+                foreach(var (name, aliases) in _commands)
+                {
+                    AddCommandHistory($"\t{name}, {string.Join(',', aliases)}");
+                }
             break;
 
             default:

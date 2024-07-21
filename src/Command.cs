@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -16,6 +17,9 @@ public class CommandParsingException : Exception
 }
 internal abstract class Command
 {
+    public abstract string FullName { get; }
+    public abstract IEnumerable<string> Aliases { get; }
+
     public static Command ParseFromString(string input)
     {
         input.Trim();
@@ -48,18 +52,67 @@ internal abstract class Command
             case "st" or "stop":
                 return new StopScriptCommand();
 
+            case "cmd" or "commands":
+                return new CommandsCommand();
+
             default:
                 throw new CommandParsingException($"Unknown command `{words[0]}`");
         }
     }
+
+    internal static Dictionary<string, IEnumerable<string>> GetCommandNamesWithAliases()
+    {
+        var assm = Assembly.GetExecutingAssembly();
+        var ret = assm.GetTypes()
+            .Where(static t => 
+                t.IsClass &&
+                !t.IsAbstract &&
+                t.BaseType == typeof(Command)
+            )
+            .Select(cmdType =>
+            {
+                var cmdInstance = (Command)assm.CreateInstance(cmdType.FullName!)!;
+                return cmdInstance;
+            })
+            .ToDictionary( static i => i.FullName, static i => i.Aliases);
+        return ret;
+    }
 }
 
-internal sealed class ShuffleCommand : Command { }
-internal sealed class LoadScriptsCommand : Command { }
-internal sealed class ListScriptsCommand : Command { }
+internal sealed class ShuffleCommand : Command 
+{
+    public override string FullName => "shuffle";
+    public override IEnumerable<string> Aliases => ["sh"];
+}
+internal sealed class LoadScriptsCommand : Command 
+{
+    public override string FullName => "load";
+    public override IEnumerable<string> Aliases => ["ld"];
+}
+internal sealed class ListScriptsCommand : Command 
+{
+    public override string FullName => "list";
+    public override IEnumerable<string> Aliases => ["ls"];
+}
 internal sealed class SelectScriptCommand : Command 
 {
+    public override string FullName => "select";
+    public override IEnumerable<string> Aliases => ["slc"];
     public required string Script { get; set; }
 }
-internal sealed class PlayScriptCommand : Command { }
-internal sealed class StopScriptCommand : Command { }
+internal sealed class PlayScriptCommand : Command 
+{
+    public override string FullName => "play";
+    public override IEnumerable<string> Aliases => ["pl"];
+}
+internal sealed class StopScriptCommand : Command 
+{
+    public override string FullName => "stop";
+    public override IEnumerable<string> Aliases => ["st"];
+}
+
+internal sealed class CommandsCommand : Command
+{
+    public override string FullName => "commands";
+    public override IEnumerable<string> Aliases => ["cmd"]; 
+}
