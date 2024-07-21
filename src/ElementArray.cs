@@ -70,6 +70,11 @@ internal sealed class ElementArray : IEnumerable
         }
         return false;
     }
+
+    internal void Sort()
+    {
+        Array.Sort(_elements);
+    }
     public IEnumerator GetEnumerator()
     {
         return _elements.GetEnumerator();

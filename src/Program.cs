@@ -120,7 +120,16 @@ internal class Program
         {
             if (_currentSorterEnumm.Current)
                 _currentSorterEnumm = null;
-            _currentSorterEnumm?.MoveNext();
+            try
+            {
+                _currentSorterEnumm?.MoveNext();
+            }
+            catch (Exception e)
+            {
+                AddCommandHistory("An error has occured while playing the script");
+                AddCommandHistory($"Error message: `{e.Message}`");
+                _currentSorterEnumm = null;
+            }
         }
 
     }
@@ -210,7 +219,8 @@ internal class Program
         int key;
         while((key = Raylib.GetCharPressed()) > 0)
         {
-            _inputText += (char)key;
+            if ((char)key != '~')
+                _inputText += (char)key;
         }
         if(Raylib.IsKeyPressed(KeyboardKey.KEY_BACKSPACE))
         {
@@ -231,12 +241,13 @@ internal class Program
             }
             catch(Exception e)
             {
-                Console.WriteLine(e.Message);
+                AddCommandHistory(e.Message);
             }
             finally
             {
                 _inputText = "";
                 _commandHistoryPtr = -1;
+                _commandHistoryOffset = 0;
             }
         }
         if (Raylib.IsKeyPressed(KeyboardKey.KEY_UP))
@@ -258,7 +269,6 @@ internal class Program
                 _inputText = elem;
             }
         }
-
     }
 
     static void ExcecuteCurrentCommand()
@@ -295,8 +305,17 @@ internal class Program
             break;
 
             case PlayScriptCommand:
-                _currentSorterEnumm = _currentSorter.Update(_sortingContext);
-                AddCommandHistory($"Now playing `{_currentSorter.Name}`");
+                try
+                {
+                    _currentSorterEnumm = _currentSorter.Update(_sortingContext);
+                    AddCommandHistory($"Now playing `{_currentSorter.Name}`");
+                }
+                catch (Exception e)
+                {
+                    AddCommandHistory("An error has occured while attempting to play the script");
+                    AddCommandHistory($"Error message: `{e.Message}`");
+                    _currentSorterEnumm = null;
+                }
             break;
 
             case StopScriptCommand:
@@ -309,6 +328,14 @@ internal class Program
                 {
                     AddCommandHistory($"\t{name}, {string.Join(',', aliases)}");
                 }
+            break;
+
+            case ReloadScripsCommand:
+                ReloadScripts();
+            break;
+
+            case OrderCommand:
+                _elementArray.Sort();
             break;
 
             default:
@@ -343,6 +370,13 @@ internal class Program
         }
     }
 
+    static void ReloadScripts()
+    {
+        AddCommandHistory("Reloading all scripts...");
+        _sorters.Clear();
+        LoadScripts();
+    }
+
     static void LoadScripts()
     {
         foreach(var sourceFile in Directory.GetFiles(_scriptsDirectoryLocation, "*.cs"))
@@ -352,13 +386,13 @@ internal class Program
                 var sorters = ScriptLoader.LoadFromFile(sourceFile);
                 foreach (var sorter in sorters)
                 {
-                    AddCommandHistory($"Loaded `{sorter.Name}` sorter from `{sourceFile}`");
                     if (_sorters.ContainsKey(sorter.Name))
                     {
                         AddCommandHistory($"Sorter with name `{sorter.Name}` already loaded");
                     }
                     else
                     {
+                        AddCommandHistory($"Loaded `{sorter.Name}` sorter from `{sourceFile}`");
                         _sorters[sorter.Name] = sorter;
                     }
                 }

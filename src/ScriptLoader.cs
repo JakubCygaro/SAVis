@@ -23,7 +23,6 @@ public class LoadingException : Exception
     public LoadingException() { }
     public LoadingException(string message) : base(message) { }
     public LoadingException(string message, Exception inner) : base(message, inner) { }
-
 }
 
 internal static class ScriptLoader
@@ -61,7 +60,7 @@ internal static class ScriptLoader
 
             foreach (Diagnostic diagnostic in failures)
             {
-                Raylib_CsLo.Raylib.TraceLog(Raylib_CsLo.TraceLogLevel.LOG_ERROR, "\t{0}: {1}", diagnostic.Id, diagnostic.GetMessage());
+                Raylib_CsLo.Raylib.TraceLog(Raylib_CsLo.TraceLogLevel.LOG_ERROR, $"\t{diagnostic.Id}: {diagnostic.GetMessage()}");
             }
             throw new LoadingException($"There were compilation errors for script `{path}`");
         }
@@ -87,8 +86,10 @@ internal static class ScriptLoader
             .Where(static v => v is not null)
             .Select(static s => s)
             .ToArray();
+
         if(sorters.Length <= 0)
             throw new LoadingException($"Could not find the proper sorter class in `{path}`");
+
         return sorters;
     }
 }

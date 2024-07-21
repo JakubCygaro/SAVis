@@ -55,6 +55,12 @@ internal abstract class Command
             case "cmd" or "commands":
                 return new CommandsCommand();
 
+            case "reld" or "reload":
+                return new ReloadScripsCommand();
+
+            case "order" or "ord":
+                return new OrderCommand();
+
             default:
                 throw new CommandParsingException($"Unknown command `{words[0]}`");
         }
@@ -115,4 +121,16 @@ internal sealed class CommandsCommand : Command
 {
     public override string FullName => "commands";
     public override IEnumerable<string> Aliases => ["cmd"]; 
+}
+
+internal sealed class ReloadScripsCommand : Command
+{
+    public override string FullName => "reload";
+    public override IEnumerable<string> Aliases => ["reld"];
+}
+
+internal sealed class OrderCommand : Command
+{
+    public override string FullName => "order";
+    public override IEnumerable<string> Aliases => ["ord"];
 }
