@@ -1,9 +1,12 @@
 ﻿using SAVis.API;
 using Raylib_CsLo;
 using System.Reflection;
+using Raylib_CsLo.InternalHelpers;
+using System.Globalization;
+using Microsoft.CodeAnalysis;
+using System.Reflection.Metadata.Ecma335;
+
 namespace SAVis;
-
-
 internal class Program
 {
     static SortingContext _sortingContext;
@@ -16,15 +19,20 @@ internal class Program
     const int _minWidth = 800;
     const int _minHeight = 600;
     const int _drawFrames = 1;
-    const int _fontSize = 24;
+    const int _textSize = 24;
     static int _commandHistorySize = 0;
     static int _commandHistoryPtr = -1;
+    static int _maxTextLength = 0;
+
+    static Font _guiFont;
+    static int _guiTextSize = 0;
+    static int _guiTextSpacing = 0;
 
     static int _commandHistoryOffset = 0;
     static Rectangle _cmdHistBox => new Rectangle()
     {
         width = _width, //(_width / 40) * 39,
-        height = (_height / 4) - _fontSize + 2,
+        height = (_height / 4) - _textSize + 2,
         x = 0,
         y = 0
     };
@@ -49,13 +57,17 @@ internal class Program
         _currentSorter = ISorter.Default;
         _sorters[_currentSorter.Name] = _currentSorter;
         _commands = Command.GetCommandNamesWithAliases();
+
+        var ci = new CultureInfo("en-US");
+        Thread.CurrentThread.CurrentCulture = ci;
+        Thread.CurrentThread.CurrentUICulture = ci;
     }
     static void Main(string[] args)
     {
         SetupRaylib();
         SetupEnvironment();
         CalculateCommandHistorySize();
-
+        MeasureMaxTextLenght();
         while(!Raylib.WindowShouldClose())
         {
             Update();
@@ -79,6 +91,9 @@ internal class Program
         RayGui.GuiEnable();
         RayGui.GuiSetStyle((int)GuiControl.DEFAULT, (int)GuiControlProperty.TEXT_COLOR_NORMAL, 0xffffff);
         RayGui.GuiSetStyle((int)GuiControl.DEFAULT, (int)GuiControlProperty.TEXT_COLOR_FOCUSED, 0xffffff);
+        _guiFont = RayGui.GuiGetFont();
+        _guiTextSize = Helpers.GuiGetStyle(GuiControl.DEFAULT, GuiDefaultProperty.TEXT_SIZE);
+        _guiTextSpacing = Helpers.GuiGetStyle(GuiControl.TEXTBOX, GuiDefaultProperty.TEXT_SPACING);
 #if DEBUG
         Raylib.SetTraceLogLevel((int)TraceLogLevel.LOG_ALL);
 #endif
@@ -97,18 +112,7 @@ internal class Program
     {
         if (Raylib.IsWindowResized())
         {
-            var handle = Raylib.GetCurrentMonitor();
-            var (monW, monH) = (Raylib.GetMonitorWidth(handle), Raylib.GetMonitorHeight(handle));
-
-            var (newW, newH) = (
-                int.Clamp(Raylib.GetScreenWidth(), _minWidth, monW),
-                int.Clamp(Raylib.GetScreenHeight(), _minHeight, monH)
-                );
-
-            _width = newW;
-            _height = newH;
-            CalculateCommandHistorySize();
-            UpdateCommandHistory();
+            ResizeWindow();
         }
 
         ProcessInput();
@@ -128,11 +132,30 @@ internal class Program
             {
                 AddCommandHistory("An error has occured while playing the script");
                 AddCommandHistory($"Error message: `{e.Message}`");
+                Console.WriteLine(e);
                 _currentSorterEnumm = null;
             }
         }
 
     }
+
+    private static void ResizeWindow()
+    {
+        var handle = Raylib.GetCurrentMonitor();
+        var (monW, monH) = (Raylib.GetMonitorWidth(handle), Raylib.GetMonitorHeight(handle));
+
+        var (newW, newH) = (
+            int.Clamp(Raylib.GetScreenWidth(), _minWidth, monW),
+            int.Clamp(Raylib.GetScreenHeight(), _minHeight, monH)
+            );
+
+        _width = newW;
+        _height = newH;
+        CalculateCommandHistorySize();
+        MeasureMaxTextLenght();
+        UpdateCommandHistory();
+    }
+
     static void Draw()
     {
         var wRatio = _width / (float)_elemCount;
@@ -173,30 +196,17 @@ internal class Program
         },
         new Color(0, 0, 0, 200));
 
+        RayGui.GuiTextBoxMulti(_cmdHistBox, _inputHistory, _textSize, false);
+
         RayGui.GuiTextBox(
             new Rectangle()
             {
                 width = _width,
-                height = _fontSize + 2,
+                height = _textSize + 2,
                 x = 0,
-                y = (_height / 4) - _fontSize + 2,
-            }, _inputText, _fontSize, true);
+                y = (_height / 4) - _textSize + 2,
+            }, _inputText, _textSize, true);
 
-        RayGui.GuiTextBoxMulti(_cmdHistBox, _inputHistory, _fontSize, false);
-
-        //(_width / 40)
-
-        //if((_v = RayGui.Scr(
-        //    new Rectangle()
-        //    {
-        //        x = (_width / 40) * 39,
-        //        y = 0,
-        //        width = (_width / 40),
-        //        height = _cmdHistBox.height
-        //    }, "", "", _v, 0, 100)) != 0)
-        //{
-        //    Console.WriteLine(_v);
-        //}
     }
 
     static void ProcessInput()
@@ -208,9 +218,15 @@ internal class Program
         if (_drawOverlay)
         {
             ReadInputText();
-            var mouseWheel = Raylib.GetMouseWheelMove();
-            _commandHistoryOffset = int.Clamp((int)(_commandHistoryOffset + mouseWheel), 0, _commandHistory.Count);
-            UpdateCommandHistory();
+            int mouseWheel;
+            if((mouseWheel = (int)Raylib.GetMouseWheelMove()) != 0)
+            {
+                _commandHistoryOffset = int.Clamp(
+                    (int)(_commandHistoryOffset + mouseWheel), 
+                    0, 
+                    _commandHistory.Count);
+                UpdateCommandHistory();
+            }
         }
     }
 
@@ -360,13 +376,26 @@ internal class Program
     static void UpdateCommandHistory()
     {
         _inputHistory = "";
+
+        int skip = 0;
         foreach (var cmd in _commandHistory
                     .Skip(_commandHistoryOffset)
                     .Take(_commandHistorySize)
                     .PadRightString(_commandHistorySize)
                     .Reverse())
         {
-            _inputHistory += $"{cmd}\n";
+
+            if (skip-- > 0) continue;
+            var lines = (cmd != "") ?
+                (cmd.Length / _maxTextLength) :
+                0;
+            skip += lines;
+            int i = 0;
+            for (; i < lines - 1; i++)
+            {
+                _inputHistory += cmd[(i * _maxTextLength).._maxTextLength] + '\n';
+            }
+            _inputHistory += $"{cmd[i..]}\n";
         }
     }
 
@@ -374,6 +403,8 @@ internal class Program
     {
         AddCommandHistory("Reloading all scripts...");
         _sorters.Clear();
+        var def = ISorter.Default;
+        _sorters[def.Name] = def;
         LoadScripts();
     }
 
@@ -397,15 +428,33 @@ internal class Program
                     }
                 }
             }
+            catch(AggregateException ae)
+            {
+                AddCommandHistory($"`{sourceFile}` failed to compile.");
+                foreach ( var ex in ae.InnerExceptions)
+                {
+                    AddCommandHistory(ex.Message);
+                    Console.WriteLine(ae.Message);
+                }
+            }
             catch(LoadingException le)
             {
                 AddCommandHistory(le.Message);
+                Console.WriteLine(le.Message);
             }
             catch(Exception e)
             {
                 AddCommandHistory(e.Message);
-                Raylib.TraceLog(TraceLogLevel.LOG_DEBUG, e.ToString());
+                Console.WriteLine($"ERROR:\t{e.ToString()}");
             }
         }
+    }
+
+    static void MeasureMaxTextLenght()
+    {
+        var letterWidth = Raylib.MeasureTextEx(_guiFont, "A", _guiTextSize, _guiTextSpacing).X;
+        Console.WriteLine(_maxTextLength);
+        var maxText = (_width / letterWidth);
+        _maxTextLength = (int)maxText;
     }
 }

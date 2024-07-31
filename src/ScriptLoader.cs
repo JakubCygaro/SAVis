@@ -12,6 +12,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Emit;
 using System.Runtime.Loader;
 using System.Runtime.CompilerServices;
+using Raylib_CsLo.InternalHelpers;
 
 
 namespace SAVis;
@@ -40,7 +41,6 @@ internal static class ScriptLoader
 
         var ast = CSharpSyntaxTree.ParseText(source);
         string assmName = Path.GetRandomFileName();
-
         CSharpCompilation compilation = CSharpCompilation.Create(
                assmName,
                syntaxTrees: new[] { ast },
@@ -53,16 +53,17 @@ internal static class ScriptLoader
 
         if (!result.Success)
         {
-            Raylib_CsLo.Raylib.TraceLog(Raylib_CsLo.TraceLogLevel.LOG_DEBUG, "Failed to compile");
+            //Console.WriteLine("ERROR: \tFailed to compile");
             IEnumerable<Diagnostic> failures = result.Diagnostics.Where(diagnostic =>
                 diagnostic.IsWarningAsError ||
                 diagnostic.Severity == DiagnosticSeverity.Error);
 
+            List<LoadingException> ls = [];
             foreach (Diagnostic diagnostic in failures)
             {
-                Raylib_CsLo.Raylib.TraceLog(Raylib_CsLo.TraceLogLevel.LOG_ERROR, $"\t{diagnostic.Id}: {diagnostic.GetMessage()}");
+                ls.Add(new LoadingException($"{diagnostic.Location.ToString()} {diagnostic.Id}: {diagnostic.GetMessage()}"));
             }
-            throw new LoadingException($"There were compilation errors for script `{path}`");
+            throw new AggregateException($"There were compilation errors for script `{path}`", ls);
         }
         ms.Seek(0, SeekOrigin.Begin);
 
