@@ -61,6 +61,12 @@ internal abstract class Command
             case "order" or "ord":
                 return new OrderCommand();
 
+            case "elements" or "elem":
+                return new ChangeElemCountCommand()
+                {
+                    Amount = int.Parse(words[1])
+                };
+
             default:
                 throw new CommandParsingException($"Unknown command `{words[0]}`");
         }
@@ -133,4 +139,12 @@ internal sealed class OrderCommand : Command
 {
     public override string FullName => "order";
     public override IEnumerable<string> Aliases => ["ord"];
+}
+
+internal sealed class ChangeElemCountCommand : Command
+{
+    public override string FullName => "elements";
+    public override IEnumerable<string> Aliases => ["elem"];
+
+    public required int Amount { get; init; }
 }

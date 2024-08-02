@@ -8,21 +8,24 @@ namespace SAVis.API;
 
 public sealed class SortingContext
 {
-    readonly ElementArray _elementArray;
+    ElementArray m_elementArray;
 
-    public int ArraySize => _elementArray.Size;
+    public int ArraySize => m_elementArray.Size;
 
     internal SortingContext(ElementArray elementArray)
     {
-        _elementArray = elementArray;
+        m_elementArray = elementArray;
     }
-
+    internal void TakeNewArray(ElementArray newElementArray)
+    {
+        m_elementArray = newElementArray;
+    }
     public uint? GetValueAt(uint index)
     {
-        return _elementArray[index];
+        return m_elementArray[index];
     }
     public bool SwapValues(uint indexA, uint indexB) 
     {
-        return _elementArray.Swap(indexA, indexB);
+        return m_elementArray.Swap(indexA, indexB);
     }
 }

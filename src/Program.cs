@@ -5,58 +5,89 @@ using Raylib_CsLo.InternalHelpers;
 using System.Globalization;
 using Microsoft.CodeAnalysis;
 using System.Reflection.Metadata.Ecma335;
+using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 
 namespace SAVis;
 internal class Program
 {
-    static SortingContext _sortingContext;
-    static ElementArray _elementArray;
+    static SortingContext s_sortingContext;
+    static ElementArray s_elementArray;
 
-    const int _elemCount = 50;
-    static int _width = 800;
-    static int _height = 600;
-    const int _fps = 60;
-    const int _minWidth = 800;
-    const int _minHeight = 600;
-    const int _drawFrames = 1;
+    static int s_elemCount = 50;
+    static int s_width = 800;
+    static int s_height = 600;
+    const int c_fps = 60;
+    const int c_minWidth = 800;
+    const int c_minHeight = 600;
+    const int c_drawFrames = 1;
     const int _textSize = 24;
     static int _commandHistorySize = 0;
-    static int _commandHistoryPtr = -1;
-    static int _maxTextLength = 0;
+    static int s_commandHistoryPtr = -1;
+    static int s_maxTextLength = 0;
 
-    static Font _guiFont;
-    static int _guiTextSize = 0;
-    static int _guiTextSpacing = 0;
+    static Font s_guiFont;
+    static int s_guiTextSize = 0;
+    static int s_guiTextSpacing = 0;
 
-    static int _commandHistoryOffset = 0;
+    static int s_commandHistoryOffset = 0;
+
+    static AudioStream s_audioStream;
     static Rectangle _cmdHistBox => new Rectangle()
     {
-        width = _width, //(_width / 40) * 39,
-        height = (_height / 4) - _textSize + 2,
+        width = s_width, //(_width / 40) * 39,
+        height = (s_height / 4) - _textSize + 2,
         x = 0,
         y = 0
     };
 
-    static bool _drawOverlay = false;
+    static bool s_drawOverlay = false;
 
-    static Dictionary<string, ISorter> _sorters = new();
+    static Dictionary<string, ISorter> s_sorters = new();
 
-    static ISorter _currentSorter;
-    static IEnumerator<bool>? _currentSorterEnumm;
-    static Command? _currentCommand;
+    static ISorter s_currentSorter;
+    static IEnumerator<bool>? s_currentSorterEnumm;
+    static Command? s_currentCommand;
 
-    static string _scriptsDirectoryLocation = "";
-    static string _inputText = "";
+    static string s_scriptsDirectoryLocation = "";
+    static string s_inputText = "";
     static string _inputHistory = "";
-    static LinkedList<string> _commandHistory = new();
-    static Dictionary<string, IEnumerable<string>> _commands;
+    static LinkedList<string> s_commandHistory = new();
+    static Dictionary<string, IEnumerable<string>> s_commands;
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public unsafe delegate void AudioInputCallbackDelegate(void* buffer, uint frames);
+
+    const int c_maxSamples = 512;
+    const int c_maxSamplesPerUpdate = 4096;
+    static float s_freq = 440.0f;
+    static float s_audioFreq = 440.0f;
+    static float s_oldFreq = 1.0f;
+    static float s_sineIdx = 0.0f;
+    static short[] s_audioData = [sizeof(short) * c_maxSamples];
+    static short[] s_writeBuf = [sizeof(short) * c_maxSamplesPerUpdate];
+    static unsafe void AudioInputCallback(void *buffer, uint frames)
+    {
+        s_audioFreq = s_audioFreq + (s_audioFreq - s_audioFreq) * 0.95f;
+
+        float incr = s_audioFreq / 44100.0f;
+        short* d = (short*)buffer;
+
+        for (uint i = 0; i < frames; i++)
+        {
+            d[i] = (short)(32000.0f * Math.Sin(2 * Math.PI * s_sineIdx));
+            s_sineIdx += incr;
+            if (s_sineIdx > 1.0f) s_sineIdx -= 1.0f;
+        }
+    }
+
     static Program()
     {
-        _elementArray = new(_elemCount);
-        _sortingContext = new(_elementArray);
-        _currentSorter = ISorter.Default;
-        _sorters[_currentSorter.Name] = _currentSorter;
-        _commands = Command.GetCommandNamesWithAliases();
+        s_elementArray = new(s_elemCount);
+        s_sortingContext = new(s_elementArray);
+        s_currentSorter = ISorter.Default;
+        s_sorters[s_currentSorter.Name] = s_currentSorter;
+        s_commands = Command.GetCommandNamesWithAliases();
 
         var ci = new CultureInfo("en-US");
         Thread.CurrentThread.CurrentCulture = ci;
@@ -71,42 +102,59 @@ internal class Program
         while(!Raylib.WindowShouldClose())
         {
             Update();
-            for(int i = 0; i < _drawFrames; i++)
+            for(int i = 0; i < c_drawFrames; i++)
             {
                 Raylib.BeginDrawing();
                 Raylib.ClearBackground(Raylib.BLACK);
                 Draw();
-                if (_drawOverlay)
+                if (s_drawOverlay)
                     DrawOverlay();
                 Raylib.EndDrawing();
             }
         }
+        Closing();
+    }
+    static void Closing()
+    {
+        Raylib.UnloadAudioStream(s_audioStream);
+        Raylib.CloseAudioDevice();
+        Raylib.CloseWindow();
     }
     static void SetupRaylib()
     {
         Raylib.SetConfigFlags(ConfigFlags.FLAG_MSAA_4X_HINT | ConfigFlags.FLAG_WINDOW_RESIZABLE);
-        Raylib.InitWindow(_width, _height, "SAVis");
-        Raylib.SetWindowMinSize(_minWidth, _minHeight);
-        Raylib.SetTargetFPS(_fps);
+        Raylib.InitWindow(s_width, s_height, "SAVis");
+        Raylib.SetWindowMinSize(c_minWidth, c_minHeight);
+        Raylib.SetTargetFPS(c_fps);
         RayGui.GuiEnable();
         RayGui.GuiSetStyle((int)GuiControl.DEFAULT, (int)GuiControlProperty.TEXT_COLOR_NORMAL, 0xffffff);
         RayGui.GuiSetStyle((int)GuiControl.DEFAULT, (int)GuiControlProperty.TEXT_COLOR_FOCUSED, 0xffffff);
-        _guiFont = RayGui.GuiGetFont();
-        _guiTextSize = Helpers.GuiGetStyle(GuiControl.DEFAULT, GuiDefaultProperty.TEXT_SIZE);
-        _guiTextSpacing = Helpers.GuiGetStyle(GuiControl.TEXTBOX, GuiDefaultProperty.TEXT_SPACING);
+        s_guiFont = RayGui.GuiGetFont();
+        s_guiTextSize = Helpers.GuiGetStyle(GuiControl.DEFAULT, GuiDefaultProperty.TEXT_SIZE);
+        s_guiTextSpacing = Helpers.GuiGetStyle(GuiControl.TEXTBOX, GuiDefaultProperty.TEXT_SPACING);
 #if DEBUG
         Raylib.SetTraceLogLevel((int)TraceLogLevel.LOG_ALL);
 #endif
         //RayGui.GuiLoadStyleDefault();
         //Raylib.InitAudioDevice();
+        //Raylib.SetAudioStreamBufferSizeDefault(c_maxSamples);
+        //s_audioStream = Raylib.LoadAudioStream(44100, 16, 1);
+        //unsafe
+        //{
+        //    var a = new AudioInputCallbackDelegate(AudioInputCallback);
+        //    delegate* unmanaged[Cdecl]<void*, uint, void> d = 
+        //        (delegate* unmanaged[Cdecl] <void*, uint, void>)Marshal.GetFunctionPointerForDelegate(a);
+        //    Raylib.SetAudioStreamCallback(s_audioStream, d);
+        //    Raylib.PlayAudioStream(s_audioStream);
+        //}
     }
     static void SetupEnvironment()
     {
         var loc = Assembly.GetEntryAssembly()!.Location;
         loc = Directory.GetParent(loc)!.FullName;
-        _scriptsDirectoryLocation = $"{loc}/scripts" ;
-        _scriptsDirectoryLocation = Path.GetFullPath(_scriptsDirectoryLocation);
-        Directory.CreateDirectory(_scriptsDirectoryLocation);
+        s_scriptsDirectoryLocation = $"{loc}/scripts" ;
+        s_scriptsDirectoryLocation = Path.GetFullPath(s_scriptsDirectoryLocation);
+        Directory.CreateDirectory(s_scriptsDirectoryLocation);
     }
     static void Update()
     {
@@ -116,24 +164,24 @@ internal class Program
         }
 
         ProcessInput();
-        if(_currentCommand is not null)
+        if(s_currentCommand is not null)
             ExcecuteCurrentCommand();
-        _elementArray.WhiteAll();
+        s_elementArray.WhiteAll();
         
-        if(_currentSorterEnumm is not null)
+        if(s_currentSorterEnumm is not null)
         {
-            if (_currentSorterEnumm.Current)
-                _currentSorterEnumm = null;
+            if (s_currentSorterEnumm.Current)
+                s_currentSorterEnumm = null;
             try
             {
-                _currentSorterEnumm?.MoveNext();
+                s_currentSorterEnumm?.MoveNext();
             }
             catch (Exception e)
             {
                 AddCommandHistory("An error has occured while playing the script");
                 AddCommandHistory($"Error message: `{e.Message}`");
                 Console.WriteLine(e);
-                _currentSorterEnumm = null;
+                s_currentSorterEnumm = null;
             }
         }
 
@@ -145,12 +193,12 @@ internal class Program
         var (monW, monH) = (Raylib.GetMonitorWidth(handle), Raylib.GetMonitorHeight(handle));
 
         var (newW, newH) = (
-            int.Clamp(Raylib.GetScreenWidth(), _minWidth, monW),
-            int.Clamp(Raylib.GetScreenHeight(), _minHeight, monH)
+            int.Clamp(Raylib.GetScreenWidth(), c_minWidth, monW),
+            int.Clamp(Raylib.GetScreenHeight(), c_minHeight, monH)
             );
 
-        _width = newW;
-        _height = newH;
+        s_width = newW;
+        s_height = newH;
         CalculateCommandHistorySize();
         MeasureMaxTextLenght();
         UpdateCommandHistory();
@@ -158,10 +206,10 @@ internal class Program
 
     static void Draw()
     {
-        var wRatio = _width / (float)_elemCount;
-        var hRatio = _height / (float)_elemCount;
+        var wRatio = s_width / (float)s_elemCount;
+        var hRatio = s_height / (float)s_elemCount;
         int index = 0;
-        foreach( (uint, ElementColor) elem in _elementArray )
+        foreach( (uint, ElementColor) elem in s_elementArray )
         {
             var color = elem.Item2 switch
             {
@@ -175,7 +223,7 @@ internal class Program
                 new() 
                 { 
                     x = index * wRatio, 
-                    y = _height - hRatio * elem.Item1,
+                    y = s_height - hRatio * elem.Item1,
                     width = wRatio,
                     height = hRatio * elem.Item1
                 },
@@ -191,8 +239,8 @@ internal class Program
         {
             x = 0,
             y = 0,
-            width = _width,
-            height = _height / 4,
+            width = s_width,
+            height = s_height / 4,
         },
         new Color(0, 0, 0, 200));
 
@@ -201,11 +249,11 @@ internal class Program
         RayGui.GuiTextBox(
             new Rectangle()
             {
-                width = _width,
+                width = s_width,
                 height = _textSize + 2,
                 x = 0,
-                y = (_height / 4) - _textSize + 2,
-            }, _inputText, _textSize, true);
+                y = (s_height / 4) - _textSize + 2,
+            }, s_inputText, _textSize, true);
 
     }
 
@@ -213,18 +261,18 @@ internal class Program
     {
         if(Raylib.IsKeyReleased(KeyboardKey.KEY_GRAVE))
         {
-            _drawOverlay = !_drawOverlay;
+            s_drawOverlay = !s_drawOverlay;
         }
-        if (_drawOverlay)
+        if (s_drawOverlay)
         {
             ReadInputText();
             int mouseWheel;
             if((mouseWheel = (int)Raylib.GetMouseWheelMove()) != 0)
             {
-                _commandHistoryOffset = int.Clamp(
-                    (int)(_commandHistoryOffset + mouseWheel), 
+                s_commandHistoryOffset = int.Clamp(
+                    (int)(s_commandHistoryOffset + mouseWheel), 
                     0, 
-                    _commandHistory.Count);
+                    s_commandHistory.Count);
                 UpdateCommandHistory();
             }
         }
@@ -236,20 +284,20 @@ internal class Program
         while((key = Raylib.GetCharPressed()) > 0)
         {
             if ((char)key != '~')
-                _inputText += (char)key;
+                s_inputText += (char)key;
         }
         if(Raylib.IsKeyPressed(KeyboardKey.KEY_BACKSPACE))
         {
-            if(_inputText.Length > 0)
-                _inputText = _inputText[..^1];
-            _commandHistoryPtr = -1;
+            if(s_inputText.Length > 0)
+                s_inputText = s_inputText[..^1];
+            s_commandHistoryPtr = -1;
         }
         if (Raylib.IsKeyPressed(KeyboardKey.KEY_ENTER))
         {
             try
             {
-                _currentCommand = Command.ParseFromString(_inputText);
-                AddCommandHistory(_inputText);
+                s_currentCommand = Command.ParseFromString(s_inputText);
+                AddCommandHistory(s_inputText);
             }
             catch(CommandParsingException cpm)
             {
@@ -261,38 +309,38 @@ internal class Program
             }
             finally
             {
-                _inputText = "";
-                _commandHistoryPtr = -1;
-                _commandHistoryOffset = 0;
+                s_inputText = "";
+                s_commandHistoryPtr = -1;
+                s_commandHistoryOffset = 0;
             }
         }
         if (Raylib.IsKeyPressed(KeyboardKey.KEY_UP))
         {
-            _commandHistoryPtr++;
-            var elem = _commandHistory.ElementAtOrDefault(_commandHistoryPtr);
+            s_commandHistoryPtr++;
+            var elem = s_commandHistory.ElementAtOrDefault(s_commandHistoryPtr);
             if (elem is not null)
             {
-                _inputText = elem;
+                s_inputText = elem;
             }
         }
         if (Raylib.IsKeyPressed(KeyboardKey.KEY_DOWN))
         {
-            _commandHistoryPtr--;
-            _commandHistoryPtr = int.Clamp(_commandHistoryPtr, -1, _commandHistory.Count);
-            var elem = _commandHistory.ElementAtOrDefault(_commandHistoryPtr);
+            s_commandHistoryPtr--;
+            s_commandHistoryPtr = int.Clamp(s_commandHistoryPtr, -1, s_commandHistory.Count);
+            var elem = s_commandHistory.ElementAtOrDefault(s_commandHistoryPtr);
             if (elem is not null)
             {
-                _inputText = elem;
+                s_inputText = elem;
             }
         }
     }
 
     static void ExcecuteCurrentCommand()
     {
-        switch(_currentCommand)
+        switch(s_currentCommand)
         {
             case ShuffleCommand:
-                _elementArray.Shuffle();
+                s_elementArray.Shuffle();
             break;
 
             case LoadScriptsCommand:
@@ -302,16 +350,16 @@ internal class Program
             case ListScriptsCommand:
                 AddCommandHistory("Currently loaded sorter scripts:");
                 int i = 1;
-                foreach(var (name, sorter) in _sorters)
+                foreach(var (name, sorter) in s_sorters)
                 {
                     AddCommandHistory($"\t {i++}. {name} by {sorter.Author}");
                 }
             break;
 
             case SelectScriptCommand select:
-                if (_sorters.GetValueOrDefault(select.Script) is ISorter selection)
+                if (s_sorters.GetValueOrDefault(select.Script) is ISorter selection)
                 {
-                    _currentSorter = selection;
+                    s_currentSorter = selection;
                     AddCommandHistory($"Selected `{selection.Name}`");
                 }
                 else
@@ -323,24 +371,24 @@ internal class Program
             case PlayScriptCommand:
                 try
                 {
-                    _currentSorterEnumm = _currentSorter.Update(_sortingContext);
-                    AddCommandHistory($"Now playing `{_currentSorter.Name}`");
+                    s_currentSorterEnumm = s_currentSorter.Update(s_sortingContext);
+                    AddCommandHistory($"Now playing `{s_currentSorter.Name}`");
                 }
                 catch (Exception e)
                 {
                     AddCommandHistory("An error has occured while attempting to play the script");
                     AddCommandHistory($"Error message: `{e.Message}`");
-                    _currentSorterEnumm = null;
+                    s_currentSorterEnumm = null;
                 }
             break;
 
             case StopScriptCommand:
-                _currentSorterEnumm = null;
+                s_currentSorterEnumm = null;
             break;
 
             case CommandsCommand:
                 AddCommandHistory("Commands:");
-                foreach(var (name, aliases) in _commands)
+                foreach(var (name, aliases) in s_commands)
                 {
                     AddCommandHistory($"\t{name}, {string.Join(',', aliases)}");
                 }
@@ -351,14 +399,18 @@ internal class Program
             break;
 
             case OrderCommand:
-                _elementArray.Sort();
+                s_elementArray.Sort();
+            break;
+
+            case ChangeElemCountCommand c:
+                ChangeElemCount(c);
             break;
 
             default:
-                AddCommandHistory($"{_currentCommand!.GetType().Name} WIP");
+                AddCommandHistory($"{s_currentCommand!.GetType().Name} WIP");
             break;
         }
-        _currentCommand = null;
+        s_currentCommand = null;
     }
 
     static void CalculateCommandHistorySize()
@@ -370,7 +422,7 @@ internal class Program
 
     static void AddCommandHistory(string cmd)
     {
-        _commandHistory.AddFirst(cmd);
+        s_commandHistory.AddFirst(cmd);
         UpdateCommandHistory();
     }
     static void UpdateCommandHistory()
@@ -378,8 +430,8 @@ internal class Program
         _inputHistory = "";
 
         int skip = 0;
-        foreach (var cmd in _commandHistory
-                    .Skip(_commandHistoryOffset)
+        foreach (var cmd in s_commandHistory
+                    .Skip(s_commandHistoryOffset)
                     .Take(_commandHistorySize)
                     .PadRightString(_commandHistorySize)
                     .Reverse())
@@ -387,13 +439,13 @@ internal class Program
 
             if (skip-- > 0) continue;
             var lines = (cmd != "") ?
-                (cmd.Length / _maxTextLength) :
+                (cmd.Length / s_maxTextLength) :
                 0;
             skip += lines;
             int i = 0;
             for (; i < lines - 1; i++)
             {
-                _inputHistory += cmd[(i * _maxTextLength).._maxTextLength] + '\n';
+                _inputHistory += cmd[(i * s_maxTextLength)..s_maxTextLength] + '\n';
             }
             _inputHistory += $"{cmd[i..]}\n";
         }
@@ -402,29 +454,29 @@ internal class Program
     static void ReloadScripts()
     {
         AddCommandHistory("Reloading all scripts...");
-        _sorters.Clear();
+        s_sorters.Clear();
         var def = ISorter.Default;
-        _sorters[def.Name] = def;
+        s_sorters[def.Name] = def;
         LoadScripts();
     }
 
     static void LoadScripts()
     {
-        foreach(var sourceFile in Directory.GetFiles(_scriptsDirectoryLocation, "*.cs"))
+        foreach(var sourceFile in Directory.GetFiles(s_scriptsDirectoryLocation, "*.cs"))
         {
             try
             {
                 var sorters = ScriptLoader.LoadFromFile(sourceFile);
                 foreach (var sorter in sorters)
                 {
-                    if (_sorters.ContainsKey(sorter.Name))
+                    if (s_sorters.ContainsKey(sorter.Name))
                     {
                         AddCommandHistory($"Sorter with name `{sorter.Name}` already loaded");
                     }
                     else
                     {
                         AddCommandHistory($"Loaded `{sorter.Name}` sorter from `{sourceFile}`");
-                        _sorters[sorter.Name] = sorter;
+                        s_sorters[sorter.Name] = sorter;
                     }
                 }
             }
@@ -452,9 +504,23 @@ internal class Program
 
     static void MeasureMaxTextLenght()
     {
-        var letterWidth = Raylib.MeasureTextEx(_guiFont, "A", _guiTextSize, _guiTextSpacing).X;
-        Console.WriteLine(_maxTextLength);
-        var maxText = (_width / letterWidth);
-        _maxTextLength = (int)maxText;
+        // A hack so I can estimate how many characters can fit in a single line
+        var letterWidth = Raylib.MeasureTextEx(s_guiFont, "A", s_guiTextSize, s_guiTextSpacing).X;
+        var maxText = (s_width / letterWidth);
+        s_maxTextLength = (int)maxText;
+    }
+
+    static void ChangeElemCount(ChangeElemCountCommand cmd)
+    {
+        if(cmd.Amount <= 0)
+        {
+            AddCommandHistory("New element count must be greater than 0!");
+            return;
+        }
+        s_currentSorterEnumm = null;
+        s_elemCount = cmd.Amount;
+        s_elementArray = new ElementArray(s_elemCount);
+        s_sortingContext.TakeNewArray(s_elementArray);
+        AddCommandHistory($"New element count is: {s_elemCount}");
     }
 }
