@@ -36,10 +36,12 @@ file class DefaultSorter : ISorter
             {
                 var a = ctx.GetValueAt(i);
                 var b = ctx.GetValueAt(i + 1);
+                yield return false;
                 if (a > b)
                 {
                     ctx.SwapValues(i, i + 1);
                     unsorted = true;
+                    yield return false;
                 }
                 yield return false;
             }
