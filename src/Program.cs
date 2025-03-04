@@ -93,7 +93,7 @@ internal class Program
         Thread.CurrentThread.CurrentCulture = ci;
         Thread.CurrentThread.CurrentUICulture = ci;
     }
-    static void Main(string[] args)
+    private static void Main()
     {
         SetupRaylib();
         SetupEnvironment();
@@ -422,7 +422,25 @@ internal class Program
 
     static void AddCommandHistory(string cmd)
     {
-        s_commandHistory.AddFirst(cmd);
+        var spaceWidht = Raylib.MeasureTextEx(s_guiFont, " ", s_guiTextSize, s_guiTextSpacing).X;
+        var wordsWithWidth = cmd.Trim()
+            .Split(' ')
+            .Select(w => (w, Raylib.MeasureTextEx(s_guiFont, w, s_guiTextSize, s_guiTextSpacing).X + spaceWidht));
+        var acc = "";
+        var widthAcc = 0.0;
+        foreach (var (word, width) in wordsWithWidth) {
+            if (widthAcc >= s_width) {
+                s_commandHistory.AddFirst(acc);
+                acc = "";
+                widthAcc = 0;
+            }else {
+                acc += word + ' ';
+                widthAcc += width;
+            }
+        }
+        if(acc != string.Empty)
+            s_commandHistory.AddFirst(acc);
+        /*s_commandHistory.AddFirst(cmd);*/
         UpdateCommandHistory();
     }
     static void UpdateCommandHistory()
